@@ -1,0 +1,102 @@
+name: ci
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  APP_NAME: hello-argocd-and-github-actions
+  IMAGE_REPO: docker.io/wellrcosta/hello-argocd-and-github-actions
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout app
+        uses: actions/checkout@v4
+
+      - name: Build & push image (Docker Hub)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_REPO }}:${{ github.sha }}
+            ${{ env.IMAGE_REPO }}:latest
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        env:
+          DOCKER_BUILDKIT: 1
+        # login antes
+      - name: Docker login
+        if: always()
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Update env-infra values with new tag
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+          # clona env-infra com PAT
+          git clone https://x-access-token:${{ secrets.ENV_INFRA_PAT }}@github.com/wellrcosta/env-infra.git
+          cd env-infra
+
+          # garante pasta do app
+          mkdir -p apps/${{ env.APP_NAME }}
+
+          # cria values.yaml mínimo se não existir
+          if [ ! -f "apps/${{ env.APP_NAME }}/values.yaml" ]; then
+            cat > apps/${{ env.APP_NAME }}/values.yaml <<EOF
+image:
+  repository: ${IMAGE_REPO}
+  tag: "dev"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+containerPort: 80
+probes:
+  enabled: true
+  path: /health
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+ingress:
+  enabled: true
+  className: traefik
+
+secret:
+  enabled: false
+  name: ""
+  data: {}
+
+cronjobs:
+  enabled: false
+  items: []
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "250m"
+    memory: "256Mi"
+EOF
+          fi
+
+          # atualiza tag -> sha atual
+          sed -i -E 's/^( *tag:).*/\1 "'${GITHUB_SHA}'"/' apps/${{ env.APP_NAME }}/values.yaml
+
+          # commit & push
+          git add apps/${{ env.APP_NAME }}/values.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: update ${APP_NAME} image tag -> ${GITHUB_SHA}"
+            git push origin main
+          else
+            echo "nothing to commit"
+          fi
