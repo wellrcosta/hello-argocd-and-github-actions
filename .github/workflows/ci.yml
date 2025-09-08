@@ -7,13 +7,14 @@ on:
 env:
   APP_NAME: hello-argocd-and-github-actions
   IMAGE_REPO: docker.io/wellrcosta/hello-argocd-and-github-actions
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout app
+      - name: Checkout (app)
         uses: actions/checkout@v4
 
       - name: Docker login (Docker Hub)
@@ -31,31 +32,29 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ env.IMAGE_REPO }}:${{ github.sha }}
+            ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_REPO }}:latest
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Update env-infra values with new tag
+      - name: Checkout (env-infra)
+        uses: actions/checkout@v4
+        with:
+          repository: wellrcosta/env-infra
+          token: ${{ secrets.ENV_INFRA_PAT }}   # PAT com write no env-infra
+          path: env-infra
+
+      - name: Update values.yaml in env-infra
         run: |
-          set -euo pipefail
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
+          set -e
+          APP_DIR="env-infra/apps/${APP_NAME}"
+          mkdir -p "${APP_DIR}"
 
-          # Clona o env-infra com PAT (precisa ter permissão de escrita)
-          git clone https://x-access-token:${{ secrets.ENV_INFRA_PAT }}@github.com/wellrcosta/env-infra.git
-          cd env-infra
-
-          # Garante pasta do app
-          mkdir -p apps/${{ env.APP_NAME }}
-
-          # Se não existir, cria um values.yaml mínimo (porta 80 e /health)
-          if [ ! -f "apps/${{ env.APP_NAME }}/values.yaml" ]; then
-            cat > apps/${{ env.APP_NAME }}/values.yaml <<EOF
+          cat > "${APP_DIR}/values.yaml" <<EOF
 image:
-  repository: ${{ env.IMAGE_REPO }}
-  tag: "${{ github.sha }}"
+  repository: ${IMAGE_REPO}
+  tag: "${IMAGE_TAG}"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
@@ -92,19 +91,18 @@ cronjobs:
 resources:
   requests:
     cpu: "50m"
+    memory: "64Mi"
   limits:
     cpu: "250m"
     memory: "256Mi"
 EOF
-          fi
 
-          # Atualiza a tag para o SHA atual
-          sed -i -E "s#^( *tag:).*#\1 \"${GITHUB_SHA}\"#" apps/${{ env.APP_NAME }}/values.yaml
-
-          git add apps/${{ env.APP_NAME }}/values.yaml
-          if ! git diff --cached --quiet; then
-            git commit -m "ci: update ${APP_NAME} image tag -> ${GITHUB_SHA}"
-            git push origin main
-          else
-            echo "nothing to commit"
-          fi
+      - name: Commit & push (env-infra)
+        run: |
+          set -e
+          cd env-infra
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add "apps/${APP_NAME}/values.yaml"
+          git commit -m "ci: set ${APP_NAME} image tag -> ${IMAGE_TAG}" || echo "no changes"
+          git push
