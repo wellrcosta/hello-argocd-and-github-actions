@@ -50,52 +50,52 @@ jobs:
           set -e
           APP_DIR="env-infra/apps/${APP_NAME}"
           mkdir -p "${APP_DIR}"
-
-          cat > "${APP_DIR}/values.yaml" <<EOF
-image:
-  repository: ${IMAGE_REPO}
-  tag: "${IMAGE_TAG}"
-  pullPolicy: IfNotPresent
-
-replicaCount: 1
-
-containerPort: 80
-probes:
-  enabled: true
-  path: /health
-  initialDelaySeconds: 3
-  periodSeconds: 10
-  timeoutSeconds: 2
-  failureThreshold: 3
-
-service:
-  port: 80
-
-ingress:
-  enabled: true
-  className: traefik
-
-extraEnv:
-  - name: PORT
-    value: "80"
-
-secret:
-  enabled: false
-  name: ""
-  data: {}
-
-cronjobs:
-  enabled: false
-  items: []
-
-resources:
-  requests:
-    cpu: "50m"
-    memory: "64Mi"
-  limits:
-    cpu: "250m"
-    memory: "256Mi"
-EOF
+          
+          cat > "${APP_DIR}/values.yaml" << 'EOF'
+          image:
+            repository: ${{ env.IMAGE_REPO }}
+            tag: "${{ env.IMAGE_TAG }}"
+            pullPolicy: IfNotPresent
+          
+          replicaCount: 1
+          
+          containerPort: 80
+          probes:
+            enabled: true
+            path: /health
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          
+          service:
+            port: 80
+          
+          ingress:
+            enabled: true
+            className: traefik
+          
+          extraEnv:
+            - name: PORT
+              value: "80"
+          
+          secret:
+            enabled: false
+            name: ""
+            data: {}
+          
+          cronjobs:
+            enabled: false
+            items: []
+          
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          EOF
 
       - name: Commit & push (env-infra)
         run: |
